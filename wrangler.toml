@@ -1,0 +1,33 @@
+name = "pg-website-manager"
+main = "dist/worker/index.js"
+compatibility_date = "2024-12-01"
+
+# Static assets from the UI build
+[site]
+bucket = "./dist"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "pg-uptime"
+database_id = "your-database-id-here"  # Replace after running: wrangler d1 create pg-uptime
+
+# R2 Bucket (for viewing backup status)
+# [[r2_buckets]]
+# binding = "BACKUPS"
+# bucket_name = "pg-backups"
+
+# Cron trigger for uptime checks
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Environment variables (set via wrangler secret put)
+# SLACK_WEBHOOK_URL
+# AWS_ACCESS_KEY_ID
+# AWS_SECRET_ACCESS_KEY
+# AWS_REGION
+# ALERT_FROM_EMAIL
+# ALERT_TO_EMAIL
+
+[vars]
+ENVIRONMENT = "production"

@@ -1,0 +1,37 @@
+{
+  "name": "pg-website-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && vite build --ssr src/worker/index.ts --outDir dist/worker",
+    "build:ui": "vite build",
+    "build:worker": "vite build --ssr src/worker/index.ts --outDir dist/worker",
+    "preview": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate": "wrangler d1 execute pg-uptime --local --file=./migrations/0001_init.sql",
+    "db:migrate:prod": "wrangler d1 execute pg-uptime --file=./migrations/0001_init.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@headlessui/react": "^2.2.0",
+    "@heroicons/react": "^2.2.0",
+    "@tailwindcss/forms": "^0.5.9",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wrangler": "^3.93.0"
+  }
+}

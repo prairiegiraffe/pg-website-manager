@@ -1,0 +1,478 @@
+Prairie Giraffe – Uptime Monitoring + Backup System
+
+Cloudflare Workers + D1 + Slack + SES + R2 + Hono + React
+MVP Build Spec (VibeCoder MD)
+
+SYSTEM GOALS
+
+Build two loosely coupled systems:
+
+Uptime Monitoring Platform
+
+Runs entirely on Cloudflare
+
+Checks site availability on a schedule
+
+Sends alerts via Slack + Amazon SES email
+
+Stores history in Cloudflare D1
+
+API + Dashboard UI (single Worker deployment)
+
+Per-Site WordPress Backup System
+
+Runs on Cloudways (DigitalOcean VPS)
+
+Backups per site (NOT whole server)
+
+Uploads archives to Cloudflare R2
+
+Designed for fast restore via SFTP + DB import
+
+Can optionally report success back to uptime system
+
+PART 1 — UPTIME MONITOR (Cloudflare)
+TECH STACK
+
+Cloudflare Workers
+
+Cloudflare Cron Triggers
+
+Cloudflare D1 (SQLite)
+
+Cloudflare Secrets
+
+Cloudflare Access (zero-code auth at the edge)
+
+Slack Incoming Webhooks
+
+Amazon SES (HTTPS API v2 — Workers don't support SMTP)
+
+Hono (lightweight Worker framework)
+
+React + Tailwind CSS (SPA dashboard)
+
+DATABASE SCHEMA (D1)
+sites
+field	type	notes
+id	integer	primary key
+name	text	human readable
+url	text	full URL
+check_interval	integer	minutes
+timeout_ms	integer	default 5000
+expected_status	integer	default 200
+keyword	text	nullable
+alert_after_failures	integer	default 3
+is_active	boolean	default true
+created_at	datetime	
+checks
+field	type
+id	integer
+site_id	integer
+status_code	integer
+response_ms	integer
+success	boolean
+checked_at	datetime
+incidents
+field	type
+id	integer
+site_id	integer
+started_at	datetime
+resolved_at	datetime
+failure_count	integer
+last_status_code	integer
+WORKER ROUTES
+GET /health
+
+Returns system status (used for sanity checks)
+
+POST /sites
+
+Create or update monitored site
+(Authenticated later; open for MVP)
+
+Payload:
+
+{
+  "name": "Client Site",
+  "url": "https://example.com",
+  "check_interval": 5,
+  "alert_after_failures": 3,
+  "keyword": "Welcome"
+}
+
+POST /check
+
+Triggered by Cron
+
+Fetch each active site
+
+Use HEAD first, fallback to GET
+
+Disable caching
+
+Measure latency
+
+Keyword check if defined
+
+Store result in checks
+
+INCIDENT LOGIC
+
+If success = false
+
+increment failure streak
+
+If failures >= alert_after_failures
+
+create or update incident
+
+send alerts
+
+When site recovers
+
+mark incident resolved
+
+send recovery alert
+
+ALERTING
+Slack
+
+Use Incoming Webhook
+
+Alert on:
+
+Incident started
+
+Incident resolved
+
+Email (Amazon SES)
+
+Implementation notes
+
+Use SES HTTPS API v2 (SendEmail action)
+
+Credentials stored as secrets
+
+Required Secrets:
+
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_REGION
+ALERT_FROM_EMAIL
+ALERT_TO_EMAIL
+
+
+Email Content:
+
+Subject: 🚨 Site Down: {site.name}
+
+Plain-text body
+
+Include:
+
+URL
+
+Status code
+
+Failure count
+
+Timestamp
+
+CRON CONFIG
+
+Cloudflare Cron:
+
+*/5 * * * *
+
+
+Worker should:
+
+Determine which sites need checking based on interval
+
+Avoid checking all sites every run if intervals differ
+
+PART 2 — WORDPRESS BACKUPS (Cloudways → R2)
+SCOPE
+
+Per-site only
+
+No Cloudflare Workers involved
+
+Runs on VPS via cron
+
+Designed for reliability and restore speed
+
+WHAT TO BACK UP
+
+For each WordPress site:
+
+Database
+
+wp-content/ (themes, plugins, uploads)
+
+Exclude:
+
+WordPress core
+
+cache directories
+
+logs
+
+BACKUP SCRIPT REQUIREMENTS
+Script name
+
+pg-backup-wp.sh
+
+Inputs (env vars or arguments)
+SITE_NAME
+APP_PATH
+DB_NAME
+DB_USER
+DB_PASS
+DB_HOST
+R2_BUCKET
+R2_PREFIX
+
+Steps (STRICT ORDER)
+
+Create temp working directory
+
+Dump DB:
+
+mysqldump --single-transaction --quick
+gzip output
+
+
+Archive wp-content:
+
+tar --exclude=cache
+gzip
+
+
+Upload both files to Cloudflare R2
+
+Use rclone OR aws s3 compatible API
+
+Verify upload success
+
+Delete temp files
+
+Exit with non-zero on failure
+
+FILE NAMING CONVENTION
+{site-name}/
+  ├── db/
+  │   └── site-db-YYYY-MM-DD.sql.gz
+  └── files/
+      └── wp-content-YYYY-MM-DD.tar.gz
+
+R2 CONFIG
+
+Use S3-compatible API
+
+Credentials stored in:
+
+~/.aws/credentials
+
+OR environment variables
+
+OPTIONAL: BACKUP HEARTBEAT
+
+After successful backup:
+
+POST https://uptime.yourdomain.com/backup-heartbeat
+Payload:
+
+{
+  "site": "example.com",
+  "status": "success",
+  "timestamp": "ISO8601"
+}
+
+
+Used to alert if backups stop running.
+
+RESTORE NOTES (DOCUMENTED BUT NOT AUTOMATED)
+
+Upload wp-content via SFTP
+
+Import DB dump
+
+Update wp-config if needed
+
+Clear cache
+
+NON-GOALS (DO NOT BUILD)
+
+No crawling full HTML sites
+
+No Google Drive integration
+
+No WordPress plugin
+
+No custom auth code (use Cloudflare Access instead)
+
+QUALITY RULES FOR AI CODER
+
+Favor boring, reliable implementations
+
+No third-party uptime services
+
+No magic abstractions
+
+Explicit error handling
+
+Logs must be readable
+
+Fail loudly on errors
+
+PART 3 — DASHBOARD UI
+
+ARCHITECTURE
+
+Single Cloudflare Worker serving both API and SPA
+
+Hono framework for routing
+
+React + Tailwind CSS for frontend
+
+Vite for build tooling
+
+ROUTES
+
+/api/*        → JSON API endpoints
+/assets/*     → Static JS/CSS bundles
+/*            → SPA HTML shell (client-side routing)
+
+DASHBOARD SCREENS
+
+Dashboard (/)
+- Site status cards (up/down with response time)
+- Active incidents list
+- Recent backup status per site
+- Quick stats (total sites, uptime %, incidents this week)
+
+Sites (/sites)
+- List all monitored sites
+- Add new site form
+- Edit/delete existing sites
+- Toggle site active/inactive
+
+Site Detail (/sites/:id)
+- Uptime chart (last 24h/7d/30d)
+- Check history table
+- Incident history
+- Backup history for this site
+
+Incidents (/incidents)
+- All incidents (active and resolved)
+- Filter by site, date range
+- Duration and failure count
+
+Backups (/backups)
+- Heartbeat status per site
+- Last backup timestamp
+- Days since last backup (alert if >1 day)
+
+Settings (/settings)
+- Slack webhook URL
+- Alert email addresses
+- Default check interval
+
+UI COMPONENTS
+
+StatusBadge - green/red/yellow pill
+SiteCard - compact site status display
+DataTable - sortable, filterable tables
+LineChart - simple uptime visualization
+Modal - for add/edit forms
+Sidebar - navigation (Tailwind UI template)
+
+DELIVERABLES
+
+Cloudflare Worker code (Hono)
+
+React SPA with Tailwind CSS
+
+D1 schema + migrations
+
+SES email sender (HTTPS API)
+
+Slack alert module
+
+pg-backup-wp.sh
+
+Example cron entry
+
+wrangler.toml
+
+.env.example
+
+README with setup + restore steps
+
+SUCCESS CRITERIA
+
+Site downtime triggers Slack + email
+
+Recovery triggers Slack + email
+
+Backups run unattended
+
+Restore can be done in <15 minutes
+
+No vendor lock-in
+
+BACKUP RETENTION
+
+Keep 30 days of backups
+
+7 daily + 4 weekly recommended
+
+Implement via R2 lifecycle rules or cleanup script
+
+AUTHENTICATION (Cloudflare Access)
+
+No auth code in the application
+
+Configured in Cloudflare dashboard:
+1. Create Access Application for your Worker domain
+2. Add Access Policy (allow specific emails)
+3. Choose identity provider (email OTP, Google, GitHub, etc.)
+
+Cloudflare Access handles:
+- Login page
+- Session management
+- JWT validation
+
+Worker receives authenticated user in CF-Access-Authenticated-User-Email header
+
+Setup steps (post-deploy):
+1. Go to Cloudflare Zero Trust dashboard
+2. Create Application → Self-hosted
+3. Set application domain to your Worker URL
+4. Add policy: Allow → Emails ending in @yourdomain.com
+5. Done — all requests now require auth
+
+PROJECT STRUCTURE
+
+pg-website-manager/
+├── src/
+│   ├── worker/           # Hono API + Worker entry
+│   │   ├── index.ts
+│   │   ├── routes/
+│   │   ├── services/
+│   │   └── lib/
+│   └── ui/               # React SPA
+│       ├── main.tsx
+│       ├── components/
+│       ├── pages/
+│       └── hooks/
+├── scripts/
+│   └── pg-backup-wp.sh
+├── migrations/           # D1 SQL migrations
+├── public/               # Static assets
+├── wrangler.toml
+├── vite.config.ts
+├── tailwind.config.js
+└── package.json
