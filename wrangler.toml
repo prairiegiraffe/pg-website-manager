@@ -1,6 +1,7 @@
 name = "pg-website-manager"
 main = "dist/worker/index.js"
 compatibility_date = "2024-12-01"
+account_id = "8863165c91205bf43cd93c16208a4fa3"
 
 # Static assets from the UI build
 [site]
@@ -10,7 +11,7 @@ bucket = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "pg-uptime"
-database_id = "your-database-id-here"  # Replace after running: wrangler d1 create pg-uptime
+database_id = "f83cb54d-256e-4c33-9ef3-4a66d1ff71b4"
 
 # R2 Bucket (for viewing backup status)
 # [[r2_buckets]]
