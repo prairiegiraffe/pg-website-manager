@@ -1,14 +1,20 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { getAssetFromKV, NotFoundError } from '@cloudflare/kv-asset-handler'
 import { sitesRoutes } from './routes/sites'
 import { checksRoutes } from './routes/checks'
 import { incidentsRoutes } from './routes/incidents'
 import { backupsRoutes } from './routes/backups'
 import { statsRoutes } from './routes/stats'
 import { cronHandler } from './services/cron'
+// @ts-expect-error - injected by wrangler at build time
+import manifestJSON from '__STATIC_CONTENT_MANIFEST'
+
+const assetManifest = JSON.parse(manifestJSON)
 
 export interface Env {
   DB: D1Database
+  __STATIC_CONTENT: KVNamespace
   SLACK_WEBHOOK_URL?: string
   AWS_ACCESS_KEY_ID?: string
   AWS_SECRET_ACCESS_KEY?: string
@@ -35,30 +41,47 @@ app.route('/api', incidentsRoutes)
 app.route('/api', backupsRoutes)
 app.route('/api', statsRoutes)
 
-// Serve SPA for non-API routes
-app.get('*', async (c) => {
-  // In production, this would serve from the static assets
-  // For now, return the HTML shell
-  return c.html(`
-    <!DOCTYPE html>
-    <html lang="en" class="h-full bg-white dark:bg-gray-900">
-      <head>
-        <meta charset="UTF-8" />
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PG Website Manager</title>
-        <script type="module" crossorigin src="/assets/index.js"></script>
-        <link rel="stylesheet" crossorigin href="/assets/index.css">
-      </head>
-      <body class="h-full">
-        <div id="root"></div>
-      </body>
-    </html>
-  `)
-})
+async function serveAsset(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  try {
+    return await getAssetFromKV(
+      { request, waitUntil: ctx.waitUntil.bind(ctx) },
+      {
+        ASSET_NAMESPACE: env.__STATIC_CONTENT,
+        ASSET_MANIFEST: assetManifest,
+      }
+    )
+  } catch (e) {
+    if (e instanceof NotFoundError) {
+      // Serve index.html for SPA routing
+      const indexRequest = new Request(new URL('/index.html', request.url).toString(), request)
+      return await getAssetFromKV(
+        { request: indexRequest, waitUntil: ctx.waitUntil.bind(ctx) },
+        {
+          ASSET_NAMESPACE: env.__STATIC_CONTENT,
+          ASSET_MANIFEST: assetManifest,
+        }
+      )
+    }
+    throw e
+  }
+}
 
 export default {
-  fetch: app.fetch,
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url)
+
+    // Handle API routes with Hono
+    if (url.pathname.startsWith('/api')) {
+      return app.fetch(request, env, ctx)
+    }
+
+    // Serve static assets
+    try {
+      return await serveAsset(request, env, ctx)
+    } catch {
+      return new Response('Not Found', { status: 404 })
+    }
+  },
 
   // Cron trigger for uptime checks
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {

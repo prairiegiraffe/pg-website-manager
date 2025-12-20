@@ -1,5 +1,5 @@
 name = "pg-website-manager"
-main = "dist/worker/index.js"
+main = "src/worker/index.ts"
 compatibility_date = "2024-12-01"
 account_id = "8863165c91205bf43cd93c16208a4fa3"
 

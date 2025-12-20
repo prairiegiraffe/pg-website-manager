@@ -5,15 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && vite build --ssr src/worker/index.ts --outDir dist/worker",
-    "build:ui": "vite build",
-    "build:worker": "vite build --ssr src/worker/index.ts --outDir dist/worker",
-    "preview": "wrangler dev",
+    "dev:worker": "wrangler dev",
+    "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
     "db:migrate": "wrangler d1 execute pg-uptime --local --file=./migrations/0001_init.sql",
-    "db:migrate:prod": "wrangler d1 execute pg-uptime --file=./migrations/0001_init.sql"
+    "db:migrate:prod": "wrangler d1 execute pg-uptime --remote --file=./migrations/0001_init.sql"
   },
   "dependencies": {
+    "@cloudflare/kv-asset-handler": "^0.4.1",
     "hono": "^4.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
