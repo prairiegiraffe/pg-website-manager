@@ -31,9 +31,11 @@ interface SiteStatus {
   last_check_success: number | null
 }
 
+// Retention period for check data (7 days)
+const RETENTION_DAYS = 7
+
 export async function cronHandler(env: Env): Promise<void> {
   const db = env.DB
-  const now = new Date()
 
   // Get all active sites that need checking based on their interval
   // Check if enough time has passed since last check
@@ -61,6 +63,37 @@ export async function cronHandler(env: Env): Promise<void> {
     } catch (err) {
       console.error(`[CRON] Error checking site ${site.name}:`, err)
     }
+  }
+
+  // Run cleanup periodically (every run is fine, query is fast with indexes)
+  await cleanupOldData(env)
+}
+
+// Delete old check data and resolved incidents to prevent database bloat
+async function cleanupOldData(env: Env): Promise<void> {
+  const db = env.DB
+
+  try {
+    // Delete checks older than retention period
+    const checksResult = await db.prepare(`
+      DELETE FROM checks WHERE checked_at < datetime('now', '-${RETENTION_DAYS} days')
+    `).run()
+
+    // Delete resolved incidents older than retention period
+    const incidentsResult = await db.prepare(`
+      DELETE FROM incidents
+      WHERE resolved_at IS NOT NULL
+      AND resolved_at < datetime('now', '-${RETENTION_DAYS} days')
+    `).run()
+
+    const checksDeleted = checksResult.meta.changes ?? 0
+    const incidentsDeleted = incidentsResult.meta.changes ?? 0
+
+    if (checksDeleted > 0 || incidentsDeleted > 0) {
+      console.log(`[CLEANUP] Deleted ${checksDeleted} old checks, ${incidentsDeleted} old incidents`)
+    }
+  } catch (err) {
+    console.error('[CLEANUP] Error during cleanup:', err)
   }
 }
 

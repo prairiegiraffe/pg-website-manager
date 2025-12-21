@@ -121,24 +121,29 @@ statsRoutes.get('/stats/chart', async (c) => {
 statsRoutes.get('/stats/sites-comparison', async (c) => {
   const db = c.env.DB
 
+  // Simplified query - get stats from checks in last 24h only
   const siteStats = await db.prepare(`
     SELECT
       s.id,
       s.name,
       s.url,
-      AVG(c.response_ms) as avg_response,
-      COUNT(c.id) as total_checks,
-      SUM(CASE WHEN c.success = 1 THEN 1 ELSE 0 END) as successful_checks,
-      CASE WHEN last_check.success = 1 THEN 'up' ELSE 'down' END as current_status
+      COALESCE(stats.avg_response, 0) as avg_response,
+      COALESCE(stats.total_checks, 0) as total_checks,
+      COALESCE(stats.successful_checks, 0) as successful_checks,
+      COALESCE(stats.last_success, 1) as last_success
     FROM sites s
-    LEFT JOIN checks c ON s.id = c.site_id AND c.checked_at >= datetime('now', '-24 hours')
     LEFT JOIN (
-      SELECT site_id, success
-      FROM checks c1
-      WHERE checked_at = (SELECT MAX(checked_at) FROM checks c2 WHERE c2.site_id = c1.site_id)
-    ) last_check ON s.id = last_check.site_id
+      SELECT
+        site_id,
+        AVG(response_ms) as avg_response,
+        COUNT(*) as total_checks,
+        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_checks,
+        (SELECT success FROM checks c2 WHERE c2.site_id = checks.site_id ORDER BY checked_at DESC LIMIT 1) as last_success
+      FROM checks
+      WHERE checked_at >= datetime('now', '-24 hours')
+      GROUP BY site_id
+    ) stats ON s.id = stats.site_id
     WHERE s.is_active = 1
-    GROUP BY s.id
     ORDER BY avg_response DESC
   `).all()
 
@@ -150,6 +155,6 @@ statsRoutes.get('/stats/sites-comparison', async (c) => {
     totalChecks: row.total_checks ?? 0,
     successfulChecks: row.successful_checks ?? 0,
     uptime: row.total_checks ? ((row.successful_checks as number) / (row.total_checks as number) * 100).toFixed(1) : '100',
-    currentStatus: row.current_status ?? 'unknown',
+    currentStatus: row.last_success ? 'up' : 'down',
   })) ?? [])
 })
