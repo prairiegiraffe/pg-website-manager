@@ -9,8 +9,19 @@ interface Site {
   check_interval: number
   timeout_ms: number
   expected_status: number
+  accept_2xx: number
   keyword: string | null
   alert_after_failures: number
+  slow_threshold_ms: number | null
+}
+
+// Default slow threshold if not set per-site (3 seconds)
+const DEFAULT_SLOW_THRESHOLD_MS = 3000
+
+// Add cache-busting query param to URL
+function addCacheBuster(url: string): string {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}_cb=${Date.now()}`
 }
 
 interface SiteStatus {
@@ -21,15 +32,27 @@ interface SiteStatus {
 
 export async function cronHandler(env: Env): Promise<void> {
   const db = env.DB
+  const now = new Date()
 
-  // Get all active sites
+  // Get all active sites that need checking based on their interval
+  // Check if enough time has passed since last check
   const sitesResult = await db.prepare(`
-    SELECT * FROM sites WHERE is_active = 1
+    SELECT s.* FROM sites s
+    LEFT JOIN (
+      SELECT site_id, MAX(checked_at) as last_checked
+      FROM checks
+      GROUP BY site_id
+    ) c ON s.id = c.site_id
+    WHERE s.is_active = 1
+    AND (
+      c.last_checked IS NULL
+      OR datetime(c.last_checked, '+' || s.check_interval || ' minutes') <= datetime('now')
+    )
   `).all<Site>()
 
   const sites = sitesResult.results ?? []
 
-  console.log(`[CRON] Checking ${sites.length} sites`)
+  console.log(`[CRON] Checking ${sites.length} sites (due for check)`)
 
   for (const site of sites) {
     try {
@@ -40,65 +63,108 @@ export async function cronHandler(env: Env): Promise<void> {
   }
 }
 
+// Browser-like headers to avoid bot blocking
+const BROWSER_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.5',
+  'Cache-Control': 'no-cache',
+}
+
+// Build request headers, including monitor secret if configured
+function getRequestHeaders(env: Env): Record<string, string> {
+  const headers = { ...BROWSER_HEADERS }
+  if (env.MONITOR_SECRET) {
+    headers['X-Monitor-Key'] = env.MONITOR_SECRET
+  }
+  return headers
+}
+
 async function checkSite(site: Site, env: Env): Promise<void> {
   const db = env.DB
   const startTime = Date.now()
   let success = false
   let statusCode = 0
+  let errorMessage: string | null = null
+  let isDegraded = false
 
   try {
-    // Try HEAD first, fallback to GET
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), site.timeout_ms)
 
-    let response: Response
-    try {
-      response = await fetch(site.url, {
-        method: 'HEAD',
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'PG-Uptime-Monitor/1.0',
-          'Cache-Control': 'no-cache',
-        },
-      })
-    } catch {
-      // Fallback to GET for servers that don't support HEAD
-      response = await fetch(site.url, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'PG-Uptime-Monitor/1.0',
-          'Cache-Control': 'no-cache',
-        },
-      })
-    }
+    // Add cache-busting to bypass CDN caches and get fresh origin response
+    const urlWithCacheBuster = addCacheBuster(site.url)
+
+    // Always use GET - HEAD requests are more likely to be blocked by bot protection
+    const response = await fetch(urlWithCacheBuster, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: getRequestHeaders(env),
+    })
 
     clearTimeout(timeout)
     statusCode = response.status
 
-    // Check status code
-    success = statusCode === site.expected_status
+    // Check status code - either exact match or any 2xx if accept_2xx is enabled
+    if (site.accept_2xx) {
+      success = statusCode >= 200 && statusCode < 300
+      if (!success) {
+        errorMessage = `Expected 2xx, got ${statusCode}`
+      }
+    } else {
+      success = statusCode === site.expected_status
+      if (!success) {
+        errorMessage = `Expected ${site.expected_status}, got ${statusCode}`
+      }
+    }
 
-    // Keyword check if configured and using GET
+    // Keyword check if configured
     if (success && site.keyword) {
       const text = await response.text()
       success = text.includes(site.keyword)
+      if (!success) {
+        errorMessage = `Keyword "${site.keyword}" not found in response`
+        console.log(`[CHECK] ${site.name} - ${errorMessage}`)
+      }
     }
   } catch (err) {
-    console.log(`[CHECK] ${site.name} - Error: ${err}`)
+    const errMsg = err instanceof Error ? err.message : String(err)
+    // Provide more descriptive error messages
+    if (errMsg.includes('aborted')) {
+      errorMessage = `Timeout after ${site.timeout_ms}ms`
+    } else if (errMsg.includes('ENOTFOUND') || errMsg.includes('getaddrinfo')) {
+      errorMessage = `DNS resolution failed`
+    } else if (errMsg.includes('ECONNREFUSED')) {
+      errorMessage = `Connection refused`
+    } else if (errMsg.includes('ECONNRESET')) {
+      errorMessage = `Connection reset`
+    } else if (errMsg.includes('certificate')) {
+      errorMessage = `SSL/TLS certificate error: ${errMsg}`
+    } else {
+      errorMessage = errMsg
+    }
+    console.log(`[CHECK] ${site.name} - Error: ${errorMessage}`)
     success = false
     statusCode = 0
   }
 
   const responseMs = Date.now() - startTime
 
-  // Store check result
-  await db.prepare(`
-    INSERT INTO checks (site_id, status_code, response_ms, success)
-    VALUES (?, ?, ?, ?)
-  `).bind(site.id, statusCode, responseMs, success ? 1 : 0).run()
+  // Check if response is slow (degraded) but still successful
+  const slowThreshold = site.slow_threshold_ms ?? DEFAULT_SLOW_THRESHOLD_MS
+  if (success && responseMs > slowThreshold) {
+    isDegraded = true
+    errorMessage = `Slow response: ${responseMs}ms (threshold: ${slowThreshold}ms)`
+  }
 
-  console.log(`[CHECK] ${site.name} - ${success ? 'UP' : 'DOWN'} (${statusCode}) ${responseMs}ms`)
+  // Store check result with error message and degraded flag
+  await db.prepare(`
+    INSERT INTO checks (site_id, status_code, response_ms, success, error_message, is_degraded)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(site.id, statusCode, responseMs, success ? 1 : 0, errorMessage, isDegraded ? 1 : 0).run()
+
+  const statusLabel = success ? (isDegraded ? 'DEGRADED' : 'UP') : 'DOWN'
+  console.log(`[CHECK] ${site.name} - ${statusLabel} (${statusCode}) ${responseMs}ms${errorMessage ? ` - ${errorMessage}` : ''}`)
 
   // Update site status and handle incidents
   await updateSiteStatus(site, success, statusCode, env)

@@ -1,30 +1,44 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
-import { api, Site, Check, Incident } from '../lib/api'
+import { ArrowLeftIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { api, Site, Check, Incident, ChartData, TimelinePoint, TestResult } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
-import { formatDateTime, formatDuration } from '../lib/utils'
+import ResponseTimeChart from '../components/ResponseTimeChart'
+import UptimeChart from '../components/UptimeChart'
+import UptimeTimeline from '../components/UptimeTimeline'
+import { formatDateTime, formatDuration, parseDbDate } from '../lib/utils'
+
+type ChartPeriod = '24h' | '30d'
 
 export default function SiteDetail() {
   const { id } = useParams<{ id: string }>()
   const [site, setSite] = useState<Site | null>(null)
   const [checks, setChecks] = useState<Check[]>([])
   const [incidents, setIncidents] = useState<Incident[]>([])
+  const [chartData, setChartData] = useState<ChartData | null>(null)
+  const [timeline, setTimeline] = useState<TimelinePoint[]>([])
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('24h')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
 
   useEffect(() => {
     async function load() {
       if (!id) return
       try {
-        const [siteData, checksData, incidentsData] = await Promise.all([
+        const [siteData, checksData, incidentsData, chartDataRes, timelineData] = await Promise.all([
           api.getSite(parseInt(id)),
           api.getChecks(parseInt(id), 50),
           api.getIncidents({ site_id: parseInt(id) }),
+          api.getChartData(parseInt(id), chartPeriod),
+          api.getTimeline(parseInt(id)),
         ])
         setSite(siteData)
         setChecks(checksData)
         setIncidents(incidentsData)
+        setChartData(chartDataRes)
+        setTimeline(timelineData)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load site')
       } finally {
@@ -32,7 +46,7 @@ export default function SiteDetail() {
       }
     }
     load()
-  }, [id])
+  }, [id, chartPeriod])
 
   if (loading) {
     return <div className="text-gray-500 dark:text-gray-400">Loading...</div>
@@ -47,6 +61,27 @@ export default function SiteDetail() {
   const avgResponse = checks.length > 0
     ? Math.round(checks.reduce((sum, c) => sum + c.response_ms, 0) / checks.length)
     : 0
+
+  async function handleTest() {
+    if (!id) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await api.testSite(parseInt(id))
+      setTestResult(result)
+      // Refresh site data to get updated status
+      const [siteData, checksData] = await Promise.all([
+        api.getSite(parseInt(id)),
+        api.getChecks(parseInt(id), 50),
+      ])
+      setSite(siteData)
+      setChecks(checksData)
+    } catch (err) {
+      console.error('Test failed:', err)
+    } finally {
+      setTesting(false)
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -70,8 +105,30 @@ export default function SiteDetail() {
               {site.url}
             </a>
           </div>
-          <StatusBadge status={site.current_status ?? 'unknown'} />
+          <div className="flex items-center gap-3">
+            <StatusBadge status={site.current_status ?? 'unknown'} />
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ArrowPathIcon className={`size-4 ${testing ? 'animate-spin' : ''}`} />
+              {testing ? 'Testing...' : 'Re-test'}
+            </button>
+          </div>
         </div>
+        {testResult && (
+          <div className={`mt-3 rounded-lg p-3 text-sm ${
+            testResult.success
+              ? 'bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300'
+          }`}>
+            <span className="font-medium">{testResult.success ? 'Success' : 'Failed'}</span>
+            {' — '}
+            Status: {testResult.statusCode}, Response: {testResult.responseMs}ms
+            {testResult.error && <span className="ml-2">({testResult.error})</span>}
+          </div>
+        )}
       </div>
 
       {/* Stats */}
@@ -80,6 +137,78 @@ export default function SiteDetail() {
         <StatCard label="Avg Response" value={`${avgResponse}ms`} />
         <StatCard label="Total Checks" value={checks.length} />
         <StatCard label="Incidents" value={incidents.length} />
+      </div>
+
+      {/* Uptime Timeline */}
+      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          Uptime Timeline
+          <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+            (last 90 checks)
+          </span>
+        </h2>
+        <UptimeTimeline data={timeline} />
+      </div>
+
+      {/* Charts with Period Selector */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Analytics</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setChartPeriod('24h')}
+              className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                chartPeriod === '24h'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+              }`}
+            >
+              Last 24 Hours
+            </button>
+            <button
+              onClick={() => setChartPeriod('30d')}
+              className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                chartPeriod === '30d'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+              }`}
+            >
+              Last 30 Days
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Response Time Chart */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+            <h3 className="text-md font-medium text-gray-900 dark:text-white mb-4">
+              Response Time
+            </h3>
+            <ResponseTimeChart data={chartData?.data ?? []} period={chartPeriod} />
+            <div className="mt-2 flex justify-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5 bg-indigo-500"></span>
+                Avg
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5 bg-green-500 border-dashed border-green-500"></span>
+                Min
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5 bg-amber-500 border-dashed border-amber-500"></span>
+                Max
+              </span>
+            </div>
+          </div>
+
+          {/* Uptime Chart */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+            <h3 className="text-md font-medium text-gray-900 dark:text-white mb-4">
+              Uptime Percentage
+            </h3>
+            <UptimeChart data={chartData?.data ?? []} period={chartPeriod} />
+          </div>
+        </div>
       </div>
 
       {/* Recent Checks */}
@@ -140,8 +269,8 @@ export default function SiteDetail() {
               <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
                 {incidents.map((incident) => {
                   const duration = incident.resolved_at
-                    ? new Date(incident.resolved_at).getTime() - new Date(incident.started_at).getTime()
-                    : Date.now() - new Date(incident.started_at).getTime()
+                    ? parseDbDate(incident.resolved_at).getTime() - parseDbDate(incident.started_at).getTime()
+                    : Date.now() - parseDbDate(incident.started_at).getTime()
                   return (
                     <tr key={incident.id}>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">

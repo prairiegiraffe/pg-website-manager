@@ -20,7 +20,7 @@ database_id = "f83cb54d-256e-4c33-9ef3-4a66d1ff71b4"
 
 # Cron trigger for uptime checks
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # Environment variables (set via wrangler secret put)
 # SLACK_WEBHOOK_URL

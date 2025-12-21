@@ -18,6 +18,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
     check_interval: 5,
     timeout_ms: 5000,
     expected_status: 200,
+    accept_2xx: false,
     keyword: '',
     alert_after_failures: 3,
     is_active: true,
@@ -31,6 +32,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
         check_interval: site.check_interval,
         timeout_ms: site.timeout_ms,
         expected_status: site.expected_status,
+        accept_2xx: site.accept_2xx ?? false,
         keyword: site.keyword ?? '',
         alert_after_failures: site.alert_after_failures,
         is_active: site.is_active,
@@ -42,6 +44,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
         check_interval: 5,
         timeout_ms: 5000,
         expected_status: 200,
+        accept_2xx: false,
         keyword: '',
         alert_after_failures: 3,
         is_active: true,
@@ -177,7 +180,8 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
                         max={599}
                         value={formData.expected_status}
                         onChange={(e) => setFormData({ ...formData, expected_status: parseInt(e.target.value) })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                        disabled={formData.accept_2xx}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white disabled:opacity-50"
                       />
                     </div>
 
@@ -194,6 +198,19 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                       />
                     </div>
+                  </div>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="accept_2xx"
+                      checked={formData.accept_2xx}
+                      onChange={(e) => setFormData({ ...formData, accept_2xx: e.target.checked })}
+                      className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+                    />
+                    <label htmlFor="accept_2xx" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                      Accept any 2xx status (200-299)
+                    </label>
                   </div>
 
                   <div>

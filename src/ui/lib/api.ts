@@ -24,13 +24,15 @@ export interface Site {
   check_interval: number
   timeout_ms: number
   expected_status: number
+  accept_2xx: boolean
   keyword: string | null
   alert_after_failures: number
   is_active: boolean
   created_at: string
-  current_status?: 'up' | 'down' | 'unknown'
+  current_status?: 'up' | 'down' | 'degraded' | 'unknown'
   last_response_ms?: number
   last_checked_at?: string
+  last_error_message?: string | null
 }
 
 export interface Check {
@@ -40,6 +42,7 @@ export interface Check {
   response_ms: number
   success: boolean
   checked_at: string
+  error_message?: string | null
 }
 
 export interface Incident {
@@ -67,6 +70,47 @@ export interface Stats {
   uptime_percentage: number
 }
 
+export interface ChartDataPoint {
+  time: string
+  avgResponse: number
+  minResponse: number
+  maxResponse: number
+  totalChecks: number
+  successfulChecks: number
+  uptime: string
+}
+
+export interface ChartData {
+  period: '24h' | '30d'
+  data: ChartDataPoint[]
+}
+
+export interface TimelinePoint {
+  time: string
+  success: boolean
+  statusCode: number
+  responseMs: number
+}
+
+export interface SiteComparison {
+  id: number
+  name: string
+  url: string
+  avgResponse: number
+  totalChecks: number
+  successfulChecks: number
+  uptime: string
+  currentStatus: 'up' | 'down' | 'degraded' | 'unknown'
+}
+
+export interface TestResult {
+  success: boolean
+  statusCode: number
+  responseMs: number
+  error: string | null
+  checkedAt: string
+}
+
 export const api = {
   // Sites
   getSites: () => request<Site[]>('/sites'),
@@ -74,9 +118,12 @@ export const api = {
   createSite: (data: Partial<Site>) => request<Site>('/sites', { method: 'POST', body: JSON.stringify(data) }),
   updateSite: (id: number, data: Partial<Site>) => request<Site>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSite: (id: number) => request<void>(`/sites/${id}`, { method: 'DELETE' }),
+  testSite: (id: number) => request<TestResult>(`/sites/${id}/test`, { method: 'POST' }),
 
   // Checks
   getChecks: (siteId: number, limit?: number) => request<Check[]>(`/sites/${siteId}/checks${limit ? `?limit=${limit}` : ''}`),
+  getChartData: (siteId: number, period?: '24h' | '30d') => request<ChartData>(`/sites/${siteId}/stats/chart${period ? `?period=${period}` : ''}`),
+  getTimeline: (siteId: number) => request<TimelinePoint[]>(`/sites/${siteId}/stats/timeline`),
 
   // Incidents
   getIncidents: (params?: { active?: boolean; site_id?: number }) => {
@@ -91,6 +138,8 @@ export const api = {
 
   // Stats
   getStats: () => request<Stats>('/stats'),
+  getAggregateChart: (period?: '24h' | '30d') => request<ChartData>(`/stats/chart${period ? `?period=${period}` : ''}`),
+  getSitesComparison: () => request<SiteComparison[]>('/stats/sites-comparison'),
 
   // Health
   getHealth: () => request<{ status: string }>('/health'),

@@ -22,6 +22,7 @@ export interface Env {
   ALERT_FROM_EMAIL?: string
   ALERT_TO_EMAIL?: string
   ENVIRONMENT?: string
+  MONITOR_SECRET?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
