@@ -25,6 +25,7 @@ export interface Site {
   timeout_ms: number
   expected_status: number
   accept_2xx: boolean
+  skip_cache_buster: boolean
   keyword: string | null
   alert_after_failures: number
   is_active: boolean

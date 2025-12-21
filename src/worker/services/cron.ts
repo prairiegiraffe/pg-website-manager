@@ -10,6 +10,7 @@ interface Site {
   timeout_ms: number
   expected_status: number
   accept_2xx: number
+  skip_cache_buster: number
   keyword: string | null
   alert_after_failures: number
   slow_threshold_ms: number | null
@@ -93,10 +94,11 @@ async function checkSite(site: Site, env: Env): Promise<void> {
     const timeout = setTimeout(() => controller.abort(), site.timeout_ms)
 
     // Add cache-busting to bypass CDN caches and get fresh origin response
-    const urlWithCacheBuster = addCacheBuster(site.url)
+    // Unless skip_cache_buster is enabled for this site (some sites have issues with it)
+    const urlToFetch = site.skip_cache_buster ? site.url : addCacheBuster(site.url)
 
     // Always use GET - HEAD requests are more likely to be blocked by bot protection
-    const response = await fetch(urlWithCacheBuster, {
+    const response = await fetch(urlToFetch, {
       method: 'GET',
       signal: controller.signal,
       headers: getRequestHeaders(env),
