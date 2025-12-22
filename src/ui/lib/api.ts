@@ -26,6 +26,7 @@ export interface Site {
   expected_status: number
   accept_2xx: boolean
   skip_cache_buster: boolean
+  no_follow_redirects: boolean
   keyword: string | null
   alert_after_failures: number
   is_active: boolean

@@ -11,6 +11,7 @@ interface Site {
   expected_status: number
   accept_2xx: number
   skip_cache_buster: number
+  no_follow_redirects: number
   keyword: string | null
   alert_after_failures: number
   slow_threshold_ms: number | null
@@ -130,18 +131,27 @@ async function checkSite(site: Site, env: Env): Promise<void> {
     // Unless skip_cache_buster is enabled for this site (some sites have issues with it)
     const urlToFetch = site.skip_cache_buster ? site.url : addCacheBuster(site.url)
 
-    // Always use GET - HEAD requests are more likely to be blocked by bot protection
-    const response = await fetch(urlToFetch, {
+    // Build fetch options - optionally disable redirect following for sites with redirect loops
+    const fetchOptions: RequestInit = {
       method: 'GET',
       signal: controller.signal,
       headers: getRequestHeaders(env),
-    })
+    }
+    if (site.no_follow_redirects) {
+      fetchOptions.redirect = 'manual'
+    }
+
+    const response = await fetch(urlToFetch, fetchOptions)
 
     clearTimeout(timeout)
     statusCode = response.status
 
     // Check status code - either exact match or any 2xx if accept_2xx is enabled
-    if (site.accept_2xx) {
+    // Also accept 3xx redirects if no_follow_redirects is enabled (we got a response, site is up)
+    if (site.no_follow_redirects && statusCode >= 300 && statusCode < 400) {
+      // Site responded with redirect - that means it's up and responding
+      success = true
+    } else if (site.accept_2xx) {
       success = statusCode >= 200 && statusCode < 300
       if (!success) {
         errorMessage = `Expected 2xx, got ${statusCode}`

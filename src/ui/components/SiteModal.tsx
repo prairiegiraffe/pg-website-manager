@@ -20,6 +20,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
     expected_status: 200,
     accept_2xx: false,
     skip_cache_buster: false,
+    no_follow_redirects: false,
     keyword: '',
     alert_after_failures: 3,
     is_active: true,
@@ -35,6 +36,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
         expected_status: site.expected_status,
         accept_2xx: site.accept_2xx ?? false,
         skip_cache_buster: site.skip_cache_buster ?? false,
+        no_follow_redirects: site.no_follow_redirects ?? false,
         keyword: site.keyword ?? '',
         alert_after_failures: site.alert_after_failures,
         is_active: site.is_active,
@@ -48,6 +50,7 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
         expected_status: 200,
         accept_2xx: false,
         skip_cache_buster: false,
+        no_follow_redirects: false,
         keyword: '',
         alert_after_failures: 3,
         is_active: true,
@@ -225,7 +228,20 @@ export default function SiteModal({ open, onClose, onSave, site }: SiteModalProp
                       className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
                     />
                     <label htmlFor="skip_cache_buster" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                      Skip cache-buster (for sites with redirect issues)
+                      Skip cache-buster (for sites with query string issues)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="no_follow_redirects"
+                      checked={formData.no_follow_redirects}
+                      onChange={(e) => setFormData({ ...formData, no_follow_redirects: e.target.checked })}
+                      className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+                    />
+                    <label htmlFor="no_follow_redirects" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                      Don't follow redirects (for sites with redirect loops)
                     </label>
                   </div>
 

@@ -72,8 +72,8 @@ sitesRoutes.post('/sites', async (c) => {
   const db = c.env.DB
 
   const result = await db.prepare(`
-    INSERT INTO sites (name, url, check_interval, timeout_ms, expected_status, accept_2xx, skip_cache_buster, keyword, alert_after_failures, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO sites (name, url, check_interval, timeout_ms, expected_status, accept_2xx, skip_cache_buster, no_follow_redirects, keyword, alert_after_failures, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     body.name,
     body.url,
@@ -82,6 +82,7 @@ sitesRoutes.post('/sites', async (c) => {
     body.expected_status ?? 200,
     body.accept_2xx ? 1 : 0,
     body.skip_cache_buster ? 1 : 0,
+    body.no_follow_redirects ? 1 : 0,
     body.keyword ?? null,
     body.alert_after_failures ?? 3,
     body.is_active !== false ? 1 : 0
@@ -111,6 +112,7 @@ sitesRoutes.put('/sites/:id', async (c) => {
       expected_status = ?,
       accept_2xx = ?,
       skip_cache_buster = ?,
+      no_follow_redirects = ?,
       keyword = ?,
       alert_after_failures = ?,
       is_active = ?
@@ -123,6 +125,7 @@ sitesRoutes.put('/sites/:id', async (c) => {
     body.expected_status,
     body.accept_2xx ? 1 : 0,
     body.skip_cache_buster ? 1 : 0,
+    body.no_follow_redirects ? 1 : 0,
     body.keyword,
     body.alert_after_failures,
     body.is_active ? 1 : 0,
