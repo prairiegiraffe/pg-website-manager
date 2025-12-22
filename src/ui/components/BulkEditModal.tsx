@@ -77,10 +77,16 @@ export default function BulkEditModal({ open, onClose, onSave, selectedCount }: 
   }
 
   function toggleField(field: keyof typeof fields) {
-    setFields(prev => ({
-      ...prev,
-      [field]: { ...prev[field], enabled: !prev[field].enabled }
-    }))
+    setFields(prev => {
+      const isBoolean = typeof prev[field].value === 'boolean'
+      const wasEnabled = prev[field].enabled
+      // For boolean fields, when enabling, also set value to true for convenience
+      const newValue = isBoolean && !wasEnabled ? true : prev[field].value
+      return {
+        ...prev,
+        [field]: { enabled: !wasEnabled, value: newValue }
+      }
+    })
   }
 
   function updateValue(field: keyof typeof fields, value: number | boolean) {

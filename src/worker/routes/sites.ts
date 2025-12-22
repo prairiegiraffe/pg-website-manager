@@ -217,6 +217,12 @@ sitesRoutes.patch('/sites/bulk', async (c) => {
   return c.json({ updated: ids.length })
 })
 
+// Add cache-busting query param to URL
+function addCacheBuster(url: string): string {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}_cb=${Date.now()}`
+}
+
 // Manual re-test a site
 sitesRoutes.post('/sites/:id/test', async (c) => {
   const id = c.req.param('id')
@@ -230,6 +236,8 @@ sitesRoutes.post('/sites/:id/test', async (c) => {
     timeout_ms: number
     expected_status: number
     accept_2xx: number
+    skip_cache_buster: number
+    no_follow_redirects: number
     keyword: string | null
   }>()
 
@@ -257,17 +265,29 @@ sitesRoutes.post('/sites/:id/test', async (c) => {
       headers['X-Monitor-Key'] = c.env.MONITOR_SECRET
     }
 
-    const response = await fetch(site.url, {
+    // Add cache-busting unless skip_cache_buster is enabled
+    const urlToFetch = site.skip_cache_buster ? site.url : addCacheBuster(site.url)
+
+    // Build fetch options - optionally disable redirect following
+    const fetchOptions: RequestInit = {
       method: 'GET',
       signal: controller.signal,
       headers,
-    })
+    }
+    if (site.no_follow_redirects) {
+      fetchOptions.redirect = 'manual'
+    }
+
+    const response = await fetch(urlToFetch, fetchOptions)
 
     clearTimeout(timeout)
     statusCode = response.status
 
     // Check status code - either exact match or any 2xx if accept_2xx is enabled
-    if (site.accept_2xx) {
+    // Also accept 3xx redirects if no_follow_redirects is enabled (we got a response, site is up)
+    if (site.no_follow_redirects && statusCode >= 300 && statusCode < 400) {
+      success = true
+    } else if (site.accept_2xx) {
       success = statusCode >= 200 && statusCode < 300
     } else {
       success = statusCode === site.expected_status
