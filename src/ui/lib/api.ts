@@ -121,6 +121,11 @@ export const api = {
   updateSite: (id: number, data: Partial<Site>) => request<Site>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSite: (id: number) => request<void>(`/sites/${id}`, { method: 'DELETE' }),
   testSite: (id: number) => request<TestResult>(`/sites/${id}/test`, { method: 'POST' }),
+  bulkUpdateSites: (ids: number[], updates: Partial<Site>) =>
+    request<{ updated: number }>('/sites/bulk', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, updates }),
+    }),
 
   // Checks
   getChecks: (siteId: number, limit?: number) => request<Check[]>(`/sites/${siteId}/checks${limit ? `?limit=${limit}` : ''}`),

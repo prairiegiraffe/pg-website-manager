@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { PlusIcon, FunnelIcon, XMarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, FunnelIcon, XMarkIcon, ArrowPathIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 import { api, Site, ChartData, SiteComparison } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import SiteModal from '../components/SiteModal'
+import BulkEditModal from '../components/BulkEditModal'
 import ResponseTimeChart from '../components/ResponseTimeChart'
 import SitesComparisonChart from '../components/SitesComparisonChart'
 import { timeAgo } from '../lib/utils'
@@ -21,6 +22,8 @@ export default function Sites() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingSite, setEditingSite] = useState<Site | null>(null)
   const [testingIds, setTestingIds] = useState<Set<number>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
 
   // Filter state - default to 'down' if there are down sites
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(
@@ -150,6 +153,51 @@ export default function Sites() {
   }
 
   const hasActiveFilters = statusFilter !== 'all' || searchQuery !== ''
+
+  function toggleSelection(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    const filteredIds = filteredSites.map(s => s.id)
+    const allSelected = filteredIds.every(id => selectedIds.has(id))
+    if (allSelected) {
+      // Deselect all filtered sites
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        filteredIds.forEach(id => next.delete(id))
+        return next
+      })
+    } else {
+      // Select all filtered sites
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        filteredIds.forEach(id => next.add(id))
+        return next
+      })
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  async function handleBulkSave(updates: Partial<Site>) {
+    await api.bulkUpdateSites([...selectedIds], updates)
+    setSelectedIds(new Set())
+    setBulkModalOpen(false)
+    loadData()
+  }
+
+  const allFilteredSelected = filteredSites.length > 0 && filteredSites.every(s => selectedIds.has(s.id))
 
   if (loading) {
     return <div className="text-gray-500 dark:text-gray-400">Loading...</div>
@@ -315,6 +363,32 @@ export default function Sites() {
         </div>
       )}
 
+      {/* Selection Bar */}
+      {selectedIds.size > 0 && (
+        <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-indigo-700 dark:text-indigo-300 font-medium">
+              {selectedIds.size} site{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setBulkModalOpen(true)}
+                className="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+              >
+                <PencilSquareIcon className="-ml-0.5 size-4" aria-hidden="true" />
+                Bulk Edit
+              </button>
+              <button
+                onClick={clearSelection}
+                className="text-sm text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 font-medium"
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sites List */}
       {filteredSites.length === 0 ? (
         <div className="text-center py-12">
@@ -341,7 +415,9 @@ export default function Sites() {
               <div
                 key={site.id}
                 className={`rounded-lg border p-4 ${
-                  site.current_status === 'down'
+                  selectedIds.has(site.id)
+                    ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-900/20'
+                    : site.current_status === 'down'
                     ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
                     : site.current_status === 'degraded'
                     ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
@@ -349,13 +425,20 @@ export default function Sites() {
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      to={`/sites/${site.id}`}
-                      className="font-medium text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400"
-                    >
-                      {site.name}
-                    </Link>
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(site.id)}
+                      onChange={() => toggleSelection(site.id)}
+                      className="mt-1 size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/sites/${site.id}`}
+                        className="font-medium text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400"
+                      >
+                        {site.name}
+                      </Link>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 truncate">
                       {site.url}
                     </p>
@@ -364,6 +447,7 @@ export default function Sites() {
                         {site.last_error_message}
                       </p>
                     )}
+                    </div>
                   </div>
                   <StatusBadge status={site.current_status ?? 'unknown'} />
                 </div>
@@ -411,6 +495,14 @@ export default function Sites() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
+                  <th className="px-4 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Name</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">URL</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Status</th>
@@ -422,9 +514,18 @@ export default function Sites() {
               <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
                 {filteredSites.map((site) => (
                   <tr key={site.id} className={
+                    selectedIds.has(site.id) ? 'bg-indigo-50 dark:bg-indigo-900/10' :
                     site.current_status === 'down' ? 'bg-red-50 dark:bg-red-900/10' :
                     site.current_status === 'degraded' ? 'bg-amber-50 dark:bg-amber-900/10' : ''
                   }>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(site.id)}
+                        onChange={() => toggleSelection(site.id)}
+                        className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+                      />
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       <Link to={`/sites/${site.id}`} className="font-medium text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400">
                         {site.name}
@@ -487,6 +588,13 @@ export default function Sites() {
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
         site={editingSite}
+      />
+
+      <BulkEditModal
+        open={bulkModalOpen}
+        onClose={() => setBulkModalOpen(false)}
+        onSave={handleBulkSave}
+        selectedCount={selectedIds.size}
       />
     </div>
   )

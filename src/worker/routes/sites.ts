@@ -146,6 +146,77 @@ sitesRoutes.delete('/sites/:id', async (c) => {
   return c.json({ success: true })
 })
 
+// Bulk update sites
+sitesRoutes.patch('/sites/bulk', async (c) => {
+  const { ids, updates } = await c.req.json<{
+    ids: number[]
+    updates: {
+      check_interval?: number
+      timeout_ms?: number
+      expected_status?: number
+      accept_2xx?: boolean
+      skip_cache_buster?: boolean
+      no_follow_redirects?: boolean
+      alert_after_failures?: number
+      is_active?: boolean
+    }
+  }>()
+  const db = c.env.DB
+
+  if (!ids || ids.length === 0) {
+    return c.json({ error: 'No site IDs provided' }, 400)
+  }
+
+  // Build dynamic SET clause based on provided updates
+  const setClauses: string[] = []
+  const values: (string | number)[] = []
+
+  if (updates.check_interval !== undefined) {
+    setClauses.push('check_interval = ?')
+    values.push(updates.check_interval)
+  }
+  if (updates.timeout_ms !== undefined) {
+    setClauses.push('timeout_ms = ?')
+    values.push(updates.timeout_ms)
+  }
+  if (updates.expected_status !== undefined) {
+    setClauses.push('expected_status = ?')
+    values.push(updates.expected_status)
+  }
+  if (updates.accept_2xx !== undefined) {
+    setClauses.push('accept_2xx = ?')
+    values.push(updates.accept_2xx ? 1 : 0)
+  }
+  if (updates.skip_cache_buster !== undefined) {
+    setClauses.push('skip_cache_buster = ?')
+    values.push(updates.skip_cache_buster ? 1 : 0)
+  }
+  if (updates.no_follow_redirects !== undefined) {
+    setClauses.push('no_follow_redirects = ?')
+    values.push(updates.no_follow_redirects ? 1 : 0)
+  }
+  if (updates.alert_after_failures !== undefined) {
+    setClauses.push('alert_after_failures = ?')
+    values.push(updates.alert_after_failures)
+  }
+  if (updates.is_active !== undefined) {
+    setClauses.push('is_active = ?')
+    values.push(updates.is_active ? 1 : 0)
+  }
+
+  if (setClauses.length === 0) {
+    return c.json({ error: 'No updates provided' }, 400)
+  }
+
+  // Create placeholders for IN clause
+  const placeholders = ids.map(() => '?').join(', ')
+  const query = `UPDATE sites SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`
+
+  await db.prepare(query).bind(...values, ...ids).run()
+
+  return c.json({ updated: ids.length })
+})
+
 // Manual re-test a site
 sitesRoutes.post('/sites/:id/test', async (c) => {
   const id = c.req.param('id')
