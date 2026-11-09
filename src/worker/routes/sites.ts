@@ -16,12 +16,15 @@ sitesRoutes.get('/sites', async (c) => {
       (SELECT checked_at FROM checks WHERE site_id = s.id ORDER BY checked_at DESC LIMIT 1) as last_checked_at,
       (SELECT error_message FROM checks WHERE site_id = s.id ORDER BY checked_at DESC LIMIT 1) as last_error_message
     FROM sites s
+    WHERE COALESCE(s.off_reason, '') != 'archived'
     ORDER BY s.name
   `).all()
 
   const result = sites.results?.map((site: Record<string, unknown>) => {
-    let status: 'up' | 'down' | 'degraded' | 'unknown' = 'unknown'
-    if (site.last_success === null) {
+    let status: 'up' | 'down' | 'degraded' | 'unknown' | 'paused' = 'unknown'
+    if (!site.is_active) {
+      status = 'paused'
+    } else if (site.last_success === null) {
       status = 'unknown'
     } else if (!site.last_success) {
       status = 'down'
@@ -62,7 +65,7 @@ sitesRoutes.get('/sites/:id', async (c) => {
   return c.json({
     ...site,
     is_active: Boolean(site.is_active),
-    current_status: site.last_success === null ? 'unknown' : site.last_success ? 'up' : 'down',
+    current_status: !site.is_active ? 'paused' : site.last_success === null ? 'unknown' : site.last_success ? 'up' : 'down',
   })
 })
 
@@ -140,9 +143,31 @@ sitesRoutes.delete('/sites/:id', async (c) => {
   const id = c.req.param('id')
   const db = c.env.DB
 
-  await db.prepare('DELETE FROM sites WHERE id = ?').bind(id).run()
-  await db.prepare('DELETE FROM site_status WHERE site_id = ?').bind(id).run()
+  await db.batch([
+    db.prepare('DELETE FROM checks WHERE site_id = ?').bind(id),
+    db.prepare('DELETE FROM incidents WHERE site_id = ?').bind(id),
+    db.prepare('DELETE FROM site_status WHERE site_id = ?').bind(id),
+    db.prepare('DELETE FROM sites WHERE id = ?').bind(id),
+  ])
 
+  return c.json({ success: true })
+})
+
+// Archive: off for good and out of the list. History kept; the cron only checks active sites.
+sitesRoutes.post('/sites/:id/archive', async (c) => {
+  const id = c.req.param('id')
+  const db = c.env.DB
+  await db.batch([
+    db.prepare("UPDATE sites SET is_active = 0, off_reason = 'archived' WHERE id = ?").bind(id),
+    db.prepare("UPDATE incidents SET resolved_at = datetime('now') WHERE site_id = ? AND resolved_at IS NULL").bind(id),
+    db.prepare('UPDATE site_status SET consecutive_failures = 0 WHERE site_id = ?').bind(id),
+  ])
+  return c.json({ success: true })
+})
+
+// Restore to Paused, so nothing is checked until it's switched back on.
+sitesRoutes.post('/sites/:id/restore', async (c) => {
+  await c.env.DB.prepare("UPDATE sites SET off_reason = 'paused' WHERE id = ? AND off_reason = 'archived'").bind(c.req.param('id')).run()
   return c.json({ success: true })
 })
 

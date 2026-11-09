@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { api, Site, Check, Incident, ChartData, TimelinePoint, TestResult } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
@@ -12,6 +12,7 @@ type ChartPeriod = '24h' | '30d'
 
 export default function SiteDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [site, setSite] = useState<Site | null>(null)
   const [checks, setChecks] = useState<Check[]>([])
   const [incidents, setIncidents] = useState<Incident[]>([])
@@ -62,6 +63,27 @@ export default function SiteDetail() {
     ? Math.round(checks.reduce((sum, c) => sum + c.response_ms, 0) / checks.length)
     : 0
 
+  const archived = site.off_reason === 'archived'
+  const quietButton = 'rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+
+  async function handleArchive() {
+    if (!site || !window.confirm(`Archive ${site.name}? It stops being checked and leaves the list. You can restore it later.`)) return
+    await api.archiveSite(site.id)
+    navigate('/sites')
+  }
+
+  async function handleRestore() {
+    if (!site) return
+    await api.restoreSite(site.id)
+    window.location.reload()
+  }
+
+  async function handleDelete() {
+    if (!site || !window.confirm(`Delete ${site.name} and all its history for good? This can't be undone.`)) return
+    await api.deleteSite(site.id)
+    navigate('/sites')
+  }
+
   async function handleTest() {
     if (!id) return
     setTesting(true)
@@ -106,15 +128,29 @@ export default function SiteDetail() {
             </a>
           </div>
           <div className="flex items-center gap-3">
-            <StatusBadge status={site.current_status ?? 'unknown'} />
-            <button
+            {archived ? (
+              <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400">Archived</span>
+            ) : (
+              <StatusBadge status={site.current_status ?? 'unknown'} />
+            )}
+            {archived ? (
+              <>
+                <button onClick={handleRestore} className={quietButton}>Restore</button>
+                {!site.platform_project_id && !site.platform_site_id && (
+                  <button onClick={handleDelete} className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:text-red-400">Delete</button>
+                )}
+              </>
+            ) : (
+              <button onClick={handleArchive} className={quietButton}>Archive</button>
+            )}
+            {!archived && <button
               onClick={handleTest}
               disabled={testing}
               className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <ArrowPathIcon className={`size-4 ${testing ? 'animate-spin' : ''}`} />
               {testing ? 'Testing...' : 'Re-test'}
-            </button>
+            </button>}
           </div>
         </div>
         {testResult && (

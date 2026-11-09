@@ -31,7 +31,10 @@ export interface Site {
   alert_after_failures: number
   is_active: boolean
   created_at: string
-  current_status?: 'up' | 'down' | 'degraded' | 'unknown'
+  current_status?: 'up' | 'down' | 'degraded' | 'unknown' | 'paused'
+  off_reason?: string | null
+  platform_project_id?: number | null
+  platform_site_id?: number | null
   last_response_ms?: number
   last_checked_at?: string
   last_error_message?: string | null
@@ -120,6 +123,8 @@ export const api = {
   createSite: (data: Partial<Site>) => request<Site>('/sites', { method: 'POST', body: JSON.stringify(data) }),
   updateSite: (id: number, data: Partial<Site>) => request<Site>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSite: (id: number) => request<void>(`/sites/${id}`, { method: 'DELETE' }),
+  archiveSite: (id: number) => request<void>(`/sites/${id}/archive`, { method: 'POST' }),
+  restoreSite: (id: number) => request<void>(`/sites/${id}/restore`, { method: 'POST' }),
   testSite: (id: number) => request<TestResult>(`/sites/${id}/test`, { method: 'POST' }),
   bulkUpdateSites: (ids: number[], updates: Partial<Site>) =>
     request<{ updated: number }>('/sites/bulk', {
